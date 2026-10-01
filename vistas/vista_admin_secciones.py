@@ -283,7 +283,7 @@ class VentanaConfigurarHorario(ctk.CTkToplevel):
         conn, cur = conectar_bd()
         if conn:
             try:
-                # Usamos substr para limpiar los segundos del formato time (08:00:00 -> 08:00)
+                # Usa substr para limpiar los segundos del formato time (08:00:00 -> 08:00)
                 cur.execute('''
                     SELECT id_horario, dia_semana, substr(hora_inicio::text, 1, 5), substr(hora_fin::text, 1, 5) 
                     FROM horario WHERE id_seccion = %s ORDER BY id_horario
@@ -321,6 +321,73 @@ class VentanaConfigurarHorario(ctk.CTkToplevel):
                 cur.close()
                 conn.close()
 
+# ==========================================
+# VENTANA MODAL: VER LISTA DE ESPERA
+# ==========================================
+class VentanaListaEspera(ctk.CTkToplevel):
+    def __init__(self, master, id_seccion, nombre_clase):
+        super().__init__(master)
+        self.title(f"Lista de Espera: {nombre_clase}")
+        self.geometry("520x450")
+        self.configure(fg_color=BG_COLOR)
+        self.grab_set()
+
+        ctk.CTkLabel(
+            self,
+            text=f"Lista de Espera:\n{nombre_clase}",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=ACCENT_COLOR,
+        ).pack(pady=15)
+
+        self.tabla_espera = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR)
+        self.tabla_espera.pack(padx=20, pady=5, fill="both", expand=True)
+        self.tabla_espera.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self.cargar_lista_espera(id_seccion)
+
+    def cargar_lista_espera(self, id_seccion):
+        encabezados = ["Cédula", "Estudiante", "Fecha Registro"]
+        for i, txt in enumerate(encabezados):
+            ctk.CTkLabel(
+                self.tabla_espera,
+                text=txt,
+                font=ctk.CTkFont(weight="bold"),
+                text_color=ACCENT_COLOR,
+            ).grid(row=0, column=i, padx=8, pady=5, sticky="w")
+
+        conn, cur = conectar_bd()
+        if conn:
+            try:
+                # Consulta directa sobre la tabla inscripcion con estado En_espera
+                cur.execute(
+                    """
+                    SELECT e.cedula, e.apellidos || ' ' || e.nombres, i.fecha_registro
+                    FROM inscripcion i
+                    JOIN estudiante e ON i.id_estudiante = e.id_estudiante
+                    WHERE i.id_seccion = %s AND i.estado = 'En_espera'
+                    ORDER BY i.fecha_registro ASC
+                """,
+                    (id_seccion,),
+                )
+
+                filas = cur.fetchall()
+                if not filas:
+                    ctk.CTkLabel(
+                        self.tabla_espera,
+                        text="No hay estudiantes en lista de espera.",
+                        text_color=TEXT_COLOR,
+                    ).grid(row=1, column=0, columnspan=3, pady=20)
+
+                for fila, (cedula, nombre, fecha) in enumerate(filas, start=1):
+                    str_fecha = (fecha.strftime("%d/%m/%Y") if fecha else "-")
+                    ctk.CTkLabel(self.tabla_espera, text=cedula, text_color=TEXT_COLOR).grid(row=fila, column=0, padx=8, pady=3, sticky="w")
+                    ctk.CTkLabel(self.tabla_espera, text=nombre, text_color=TEXT_COLOR).grid(row=fila, column=1, padx=8, pady=3, sticky="w")
+                    ctk.CTkLabel(self.tabla_espera, text=str_fecha, text_color=TEXT_COLOR).grid(row=fila, column=2, padx=8, pady=3, sticky="w")
+            except Exception as e:
+                print("Error cargando lista de espera:", e)
+            finally:
+                cur.close()
+                conn.close()
 
 # ==========================================
 # PANEL PRINCIPAL: VISTA SECCIONES
@@ -335,29 +402,32 @@ class VistaAdminSecciones(ctk.CTkFrame):
         frame_controles = ctk.CTkFrame(self, fg_color="transparent")
         frame_controles.pack(fill="x", padx=20, pady=10)
 
-        self.btn_listar = ctk.CTkButton(frame_controles, text="Recargar", width=90, fg_color=ACCENT_COLOR, text_color=BG_COLOR, font=ctk.CTkFont(weight="bold"), command=self.cargar_secciones)
-        self.btn_listar.pack(side="left", padx=5)
+        self.btn_listar = ctk.CTkButton(frame_controles, text="Recargar", width=80, fg_color=ACCENT_COLOR, text_color=BG_COLOR, font=ctk.CTkFont(weight="bold"), command=self.cargar_secciones)
+        self.btn_listar.pack(side="left", padx=4)
 
-        self.btn_nuevo = ctk.CTkButton(frame_controles, text="+ Nueva Sección", width=120, fg_color="transparent", border_width=1, border_color=ACCENT_COLOR, text_color=TEXT_COLOR, command=self.abrir_modal_nuevo)
-        self.btn_nuevo.pack(side="left", padx=5)
+        self.btn_nuevo = ctk.CTkButton(frame_controles, text="+ Nueva Sección", width=110, fg_color="transparent", border_width=1, border_color=ACCENT_COLOR, text_color=TEXT_COLOR, command=self.abrir_modal_nuevo)
+        self.btn_nuevo.pack(side="left", padx=4)
 
-        ctk.CTkLabel(frame_controles, text="Periodo:", text_color=TEXT_COLOR).pack(side="left", padx=(15, 2))
-        self.combo_periodo = ctk.CTkOptionMenu(frame_controles, width=130, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR, button_color=ACCENT_COLOR, command=self.cargar_secciones)
-        self.combo_periodo.pack(side="left", padx=5)
+        #Periodo
+        ctk.CTkLabel(frame_controles, text="Periodo:", text_color=TEXT_COLOR).pack(side="left", padx=(10, 2))
+        self.combo_periodo = ctk.CTkOptionMenu(frame_controles, width=120, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR, button_color=ACCENT_COLOR, command=self.cargar_secciones)
+        self.combo_periodo.pack(side="left", padx=4)
 
-        # NUEVO FILTRO: Carrera
+        # Carrera
         ctk.CTkLabel(frame_controles, text="Carrera:", text_color=TEXT_COLOR).pack(side="left", padx=(10, 2))
-        self.combo_carrera = ctk.CTkOptionMenu(frame_controles, width=150, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR, button_color=ACCENT_COLOR, command=self.cargar_secciones)
-        self.combo_carrera.pack(side="left", padx=5)
+        self.combo_carrera = ctk.CTkOptionMenu(frame_controles, width=130, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR, button_color=ACCENT_COLOR, command=self.cargar_secciones)
+        self.combo_carrera.pack(side="left", padx=4)
 
+        # Busqueda
         ctk.CTkLabel(frame_controles, text="Buscar:", text_color=TEXT_COLOR).pack(side="left", padx=(10, 2))
-        self.ent_busqueda = ctk.CTkEntry(frame_controles, placeholder_text="Materia o Docente...", width=140, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR)
-        self.ent_busqueda.pack(side="left", padx=5)
+        self.ent_busqueda = ctk.CTkEntry(frame_controles, placeholder_text="Materia o Docente...", width=130, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR)
+        self.ent_busqueda.pack(side="left", padx=4)
         self.ent_busqueda.bind("<Return>", lambda event: self.cargar_secciones())
 
         self.tabla_frame = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR)
         self.tabla_frame.pack(padx=20, pady=10, fill="both", expand=True)
-        # 5 Columnas en total ahora
+
+        # 5 Columnas en total
         self.tabla_frame.grid_columnconfigure((0,1,2,3), weight=1)
         self.tabla_frame.grid_columnconfigure(4, weight=0)
 
@@ -422,7 +492,7 @@ class VistaAdminSecciones(ctk.CTkFrame):
         for widget in self.tabla_frame.winfo_children():
             widget.destroy()
 
-        # Quitamos "Materia" de las columnas porque ahora será un subtítulo agrupador
+        # Materia es un subtítulo agrupador
         encabezados = ["Sec.", "Profesor", "Horario", "Cupo (Ins/Max)", "Acciones"]
         for i, texto in enumerate(encabezados):
             ctk.CTkLabel(self.tabla_frame, text=texto, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=5, pady=10, sticky="w")
@@ -432,7 +502,8 @@ class VistaAdminSecciones(ctk.CTkFrame):
             try:
                 query = '''
                     SELECT s.id_seccion, s.identificador, c.nombre, p.nombres, p.apellidos, c.cupo_maximo,
-                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion) as inscritos,
+                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion AND i.estado = 'Inscrito') AS inscritos,
+                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion AND i.estado = 'En_espera') AS en_espera,
                            COALESCE(array_to_string(array_agg(h.dia_semana || ' ' || substr(h.hora_inicio::text, 1, 5) || '-' || substr(h.hora_fin::text, 1, 5) ORDER BY h.id_horario), ' | '), 'Sin asignar') as horario_str
                     FROM seccion s
                     JOIN curso c ON s.id_curso = c.id_curso
@@ -449,20 +520,22 @@ class VistaAdminSecciones(ctk.CTkFrame):
 
                 if termino_busqueda != "":
                     query += " AND (c.nombre ILIKE %s OR p.apellidos ILIKE %s)"
-                    params.extend([f"%{termino_busqueda}%", f"%{termino_busqueda}%"])
+                    params.extend(
+                        [f"%{termino_busqueda}%", f"%{termino_busqueda}%"]
+                    )
 
                 query += " GROUP BY s.id_seccion, c.nombre, p.nombres, p.apellidos, c.cupo_maximo ORDER BY c.nombre, s.identificador"
-                
+
                 cur.execute(query, tuple(params))
                 secciones = cur.fetchall()
 
                 if not secciones:
-                    ctk.CTkLabel(self.tabla_frame, text="No hay secciones en este periodo.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=5, pady=20)
+                    ctk.CTkLabel(self.tabla_frame, text="No hay secciones coincidentes.", text_color=TEXT_COLOR, ).grid(row=1, column=0, columnspan=6, pady=20)
 
                 fila_actual = 1
                 curso_actual = None
 
-                for id_sec, ident, curso, nom_prof, ape_prof, cupo_max, inscritos, horario_str in secciones:
+                for id_sec, ident, curso, nom_prof, ape_prof, cupo_max, inscritos, en_espera, horario_str in secciones:
                     # Lógica de agrupación visual
                     if curso != curso_actual:
                         curso_actual = curso
@@ -470,25 +543,31 @@ class VistaAdminSecciones(ctk.CTkFrame):
                         lbl_separador.grid(row=fila_actual, column=0, columnspan=5, pady=(15, 5), sticky="w")
                         fila_actual += 1
 
-                    ctk.CTkLabel(self.tabla_frame, text=ident, text_color=TEXT_COLOR).grid(row=fila_actual, column=0, padx=15, pady=5, sticky="w")
-                    ctk.CTkLabel(self.tabla_frame, text=f"{ape_prof}, {nom_prof}", text_color=TEXT_COLOR).grid(row=fila_actual, column=1, padx=5, pady=5, sticky="w")
-                    ctk.CTkLabel(self.tabla_frame, text=horario_str, text_color=TEXT_COLOR).grid(row=fila_actual, column=2, padx=5, pady=5, sticky="w")
+                    ctk.CTkLabel(self.tabla_frame, text=ident, text_color=TEXT_COLOR).grid(row=fila_actual, column=0, padx=5, pady=3, sticky="w")
+                    ctk.CTkLabel(self.tabla_frame, text=f"{ape_prof}, {nom_prof}", text_color=TEXT_COLOR).grid(row=fila_actual, column=1, padx=5, pady=3, sticky="w")
+                    ctk.CTkLabel(self.tabla_frame, text=horario_str, text_color=TEXT_COLOR).grid(row=fila_actual, column=2, padx=5, pady=3, sticky="w")
 
                     color_cupo = RED_COLOR if inscritos >= cupo_max else TEXT_COLOR
-                    ctk.CTkLabel(self.tabla_frame, text=f"{inscritos} / {cupo_max}", text_color=color_cupo, font=ctk.CTkFont(weight="bold")).grid(row=fila_actual, column=3, padx=5, pady=5, sticky="w")
+                    texto_cupo = f"{inscritos} / {cupo_max}"
+                    if en_espera > 0:
+                        texto_cupo += f"  (⏳ {en_espera})"
+
+                    ctk.CTkLabel(self.tabla_frame, text=texto_cupo, text_color=color_cupo, font=ctk.CTkFont(weight="bold"),).grid(row=fila_actual, column=3, padx=5, pady=3, sticky="w")
 
                     frame_acciones = ctk.CTkFrame(self.tabla_frame, fg_color="transparent")
-                    frame_acciones.grid(row=fila_actual, column=4, padx=5, pady=5, sticky="e")
+                    frame_acciones.grid(row=fila_actual, column=4, padx=5, pady=3, sticky="e")
 
                     btn_lista = ctk.CTkButton(frame_acciones, text="Ver Lista", width=70, fg_color=ACCENT_COLOR, text_color=BG_COLOR, command=lambda id_s=id_sec, nom=f"{curso} ({ident})": VentanaListaClase(self, id_s, nom))
                     btn_lista.pack(side="left", padx=2)
+
+                    btn_espera = ctk.CTkButton(frame_acciones, text=f"Espera ({en_espera})", width=75, fg_color=SIDEBAR_COLOR if en_espera == 0 else ACCENT_COLOR, text_color=TEXT_COLOR if en_espera == 0 else BG_COLOR, border_width=1, border_color=ACCENT_COLOR, command=lambda id_s=id_sec, nom=f"{curso} ({ident})": VentanaListaEspera(self, id_s, nom ),)
+                    btn_espera.pack(side="left", padx=2)
 
                     btn_hora = ctk.CTkButton(frame_acciones, text="🕒 Horario", width=70, fg_color="transparent", border_width=1, border_color=ACCENT_COLOR, text_color=TEXT_COLOR, command=lambda id_s=id_sec, nom=f"{curso} ({ident})": VentanaConfigurarHorario(self, id_s, nom, self.cargar_secciones))
                     btn_hora.pack(side="left", padx=2)
 
                     btn_borrar = ctk.CTkButton(frame_acciones, text="X", width=30, fg_color=RED_COLOR, text_color=TEXT_COLOR, command=lambda id_s=id_sec: self.borrar_seccion(id_s))
                     btn_borrar.pack(side="left", padx=2)
-                    
                     fila_actual += 1
 
             except Exception as e:

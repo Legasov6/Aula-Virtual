@@ -85,7 +85,7 @@ class AulaVirtualApp(ctk.CTk):
             self.vista_actual = VistaEstudiante(self)
             self.crear_boton_submenu("🎓 Mi Portal", lambda: self.cargar_vista_estudiante())
 
-        # ESTA ES LA LÍNEA QUE DIBUJA LA PANTALLA. NO DEBE ESTAR INDENTADA DENTRO DEL ELIF.
+        # LÍNEA QUE DIBUJA LA PANTALLA
         self.vista_actual.grid(row=0, column=1, sticky="nsew")
 
 

@@ -50,7 +50,7 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
             try:
                 query = '''
                     SELECT s.id_seccion, s.identificador, p.nombres, p.apellidos, c.cupo_maximo,
-                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion) as inscritos,
+                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion AND i.estado = 'Inscrito') as inscritos,
                            COALESCE(array_to_string(array_agg(h.dia_semana || ' ' || substr(h.hora_inicio::text, 1, 5) || '-' || substr(h.hora_fin::text, 1, 5) ORDER BY h.id_horario), ' | '), 'Sin asignar') as horario_str
                     FROM seccion s
                     JOIN curso c ON s.id_curso = c.id_curso
@@ -78,10 +78,13 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
                     frame_acc.grid(row=fila_idx, column=4, padx=5, pady=5, sticky="e")
 
                     if inscritos >= cupo_max:
-                        btn = ctk.CTkButton(frame_acc, text="Lleno", width=80, fg_color=RED_COLOR, text_color=TEXT_COLOR, state="disabled")
+                        btn = ctk.CTkButton(frame_acc, text="En Espera", width=90, fg_color=ACCENT_COLOR, text_color=BG_COLOR, font=ctk.CTkFont(weight="bold"),
+                                            command=lambda s=id_sec: self.procesar_inscripcion(s, en_espera=True))
                     else:
-                        btn = ctk.CTkButton(frame_acc, text="Inscribir", width=80, fg_color=BLUE_COLOR, text_color=TEXT_COLOR, font=ctk.CTkFont(weight="bold"), command=lambda s=id_sec: self.procesar_inscripcion(s))
-                    btn.pack(side="left", padx=2)
+                        btn = ctk.CTkButton(frame_acc, text="Inscribir", width=80, fg_color=BLUE_COLOR, text_color=TEXT_COLOR, 
+                                            font=ctk.CTkFont(weight="bold"), command=lambda s=id_sec: self.procesar_inscripcion(s, en_espera=False))
+
+                    btn.pack(padx=2, pady=2)
 
             except Exception as e:
                 print("Error cargando secciones de la materia:", e)
@@ -89,35 +92,40 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
                 cur.close()
                 conn.close()
 
-    def procesar_inscripcion(self, id_seccion):
+    def procesar_inscripcion(self, id_seccion, en_espera=False):
         self.lbl_msj.configure(text="")
         conn, cur = conectar_bd()
         if conn:
             try:
-                cur.execute("SELECT saldo FROM estudiante WHERE id_estudiante = %s", (self.id_estudiante,))
-                saldo_actual = cur.fetchone()[0]
+            # Si se va a inscribir de forma regular
+                if not en_espera:
+                    cur.execute("SELECT saldo FROM estudiante WHERE id_estudiante = %s", (self.id_estudiante,))
+                    saldo_actual = cur.fetchone()[0]
 
-                if saldo_actual < self.costo:
-                    self.lbl_msj.configure(text=f"Saldo insuficiente. Necesitas ${self.costo:.2f}", text_color=RED_COLOR)
-                    return
+                    if saldo_actual < self.costo:
+                        self.lbl_msj.configure(text=f"Saldo insuficiente. Necesitas ${self.costo:.2f}", text_color=RED_COLOR)
+                        return
 
-                cur.execute(
-                    "INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, %s, 'Inscrito')",
-                    (self.id_estudiante, id_seccion, self.costo)
-                )
-                cur.execute(
-                    "UPDATE estudiante SET saldo = saldo - %s WHERE id_estudiante = %s",
-                    (self.costo, self.id_estudiante)
-                )
+                    cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, %s, 'Inscrito')",
+                        (self.id_estudiante, id_seccion, self.costo))
+                    cur.execute("UPDATE estudiante SET saldo = saldo - %s WHERE id_estudiante = %s",
+                        (self.costo, self.id_estudiante))
+                    msj_exito = "¡Inscrito correctamente!"
+                else:
+                    # Registrar en Lista de Espera (mantenemos costo_cobrado = 0.00 hasta que se libere un cupo)
+                    cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, 0.00, 'En_espera')",
+                    (self.id_estudiante, id_seccion))
+                    msj_exito = "¡Agregado a la Lista de Espera!"
+
                 conn.commit()
 
-                self.lbl_msj.configure(text="¡Inscrito correctamente!", text_color=GREEN_COLOR)
+                self.lbl_msj.configure(text=msj_exito, text_color=GREEN_COLOR)
                 self.callback_actualizar()
                 self.after(1000, self.destroy) 
 
             except psycopg2.errors.UniqueViolation:
                 conn.rollback()
-                self.lbl_msj.configure(text="Error: Ya estás inscrito en esta materia.", text_color=RED_COLOR)
+                self.lbl_msj.configure(text="Error: Ya estás registrado o en lista de espera para esta materia.", text_color=RED_COLOR)
             except Exception as e:
                 conn.rollback()
                 self.lbl_msj.configure(text=f"Error: {e}", text_color=RED_COLOR)
