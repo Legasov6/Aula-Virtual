@@ -105,8 +105,7 @@ class VentanaEvaluaciones(ctk.CTkToplevel):
             try:
                 cur.execute("SELECT id_evaluacion, descripcion, ponderacion FROM evaluacion WHERE id_seccion = %s ORDER BY id_evaluacion", (self.id_seccion,))
                 filas = cur.fetchall()
-                
-                # ¡AQUÍ ESTÁ LA MAGIA! Convertimos f[2] a float para que no pelee con Python
+               
                 self.peso_actual = sum([float(f[2]) for f in filas])
                 
                 color_peso = GREEN_COLOR if self.peso_actual == 100.0 else TEXT_COLOR
@@ -149,7 +148,7 @@ class VentanaCalificaciones(ctk.CTkToplevel):
     def __init__(self, master, id_seccion, nombre_clase):
         super().__init__(master)
         self.title(f"Calificaciones: {nombre_clase}")
-        self.geometry("850x600")
+        self.geometry("1050x600")
         self.configure(fg_color=BG_COLOR)
         self.grab_set()
 
@@ -169,8 +168,9 @@ class VentanaCalificaciones(ctk.CTkToplevel):
 
         self.tabla_notas = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR)
         self.tabla_notas.pack(padx=20, pady=5, fill="both", expand=True)
+        
         self.tabla_notas.grid_columnconfigure((0,1), weight=1)
-        self.tabla_notas.grid_columnconfigure((2,3,4), weight=0)
+        self.tabla_notas.grid_columnconfigure((2,3,5), weight=0)
 
         self.mapa_evaluaciones = {}
         self.cargar_opciones_evaluaciones()
@@ -213,7 +213,7 @@ class VentanaCalificaciones(ctk.CTkToplevel):
         if seleccion not in self.mapa_evaluaciones: return
         id_evaluacion = self.mapa_evaluaciones[seleccion]
 
-        encabezados = ["Cédula", "Estudiante", "Nota (1-10)", "Estado", "Acción"]
+        encabezados = ["Cédula", "Estudiante", "Nota (1-10)", "Estado", "Observaciones", "Acción"]
         for i, txt in enumerate(encabezados):
             ctk.CTkLabel(self.tabla_notas, text=txt, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=5, pady=10, sticky="w")
 
@@ -222,7 +222,7 @@ class VentanaCalificaciones(ctk.CTkToplevel):
             try:
                 query = '''
                     SELECT e.id_estudiante, e.cedula, e.apellidos, e.nombres,
-                           c.id_calificacion, c.nota_numerica, c.nota_conceptual
+                           c.id_calificacion, c.nota_numerica, c.nota_conceptual, c.observaciones
                     FROM inscripcion i
                     JOIN estudiante e ON i.id_estudiante = e.id_estudiante
                     LEFT JOIN calificacion c ON e.id_estudiante = c.id_estudiante AND c.id_evaluacion = %s
@@ -235,7 +235,7 @@ class VentanaCalificaciones(ctk.CTkToplevel):
                 if not alumnos:
                     ctk.CTkLabel(self.tabla_notas, text="No hay alumnos inscritos en esta sección.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=5, pady=20)
 
-                for fila, (id_est, cedula, apellidos, nombres, id_calif, nota_num, nota_con) in enumerate(alumnos, start=1):
+                for fila, (id_est, cedula, apellidos, nombres, id_calif, nota_num, nota_con, obs) in enumerate(alumnos, start=1):
                     ctk.CTkLabel(self.tabla_notas, text=cedula, text_color=TEXT_COLOR).grid(row=fila, column=0, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_notas, text=f"{apellidos}, {nombres}", text_color=TEXT_COLOR).grid(row=fila, column=1, padx=5, pady=5, sticky="w")
                     
@@ -245,18 +245,22 @@ class VentanaCalificaciones(ctk.CTkToplevel):
                     if nota_num is not None:
                         ent_nota.insert(0, str(nota_num))
 
-                    # Combobox para el concepto
                     cb_estado = ctk.CTkComboBox(self.tabla_notas, values=["Aprobado", "Reprobado"], width=120, fg_color=BG_COLOR, button_color=ACCENT_COLOR)
                     cb_estado.grid(row=fila, column=3, padx=5, pady=5, sticky="w")
                     cb_estado.set(nota_con if nota_con else "Reprobado")
+
+                    ent_obs = ctk.CTkEntry(self.tabla_notas, placeholder_text="Ej: Entrega tardía", width=200, fg_color=BG_COLOR, text_color=TEXT_COLOR)
+                    ent_obs.grid(row=fila, column=4, padx=5, pady=5, sticky="ew")
+                    if obs:
+                        ent_obs.insert(0, str(obs))
 
                     texto_btn = "Actualizar" if id_calif else "Guardar"
                     color_btn = BLUE_COLOR if id_calif else GREEN_COLOR
                     
                     # Pasamos los widgets directamente al lambda para extraer sus valores en la función
                     btn_guardar = ctk.CTkButton(self.tabla_notas, text=texto_btn, width=70, fg_color=color_btn, text_color=BG_COLOR, font=ctk.CTkFont(weight="bold"),
-                                                command=lambda e=id_est, c=id_calif, ent=ent_nota, cb=cb_estado: self.guardar_nota(e, c, ent, cb, id_evaluacion))
-                    btn_guardar.grid(row=fila, column=4, padx=5, pady=5, sticky="e")
+                                                command=lambda e=id_est, c=id_calif, ent=ent_nota, cb=cb_estado, obs=ent_obs: self.guardar_nota(e, c, ent, cb, obs, id_evaluacion))
+                    btn_guardar.grid(row=fila, column=5, padx=5, pady=5, sticky="e")
 
             except Exception as e:
                 print("Error cargando alumnos para notas:", e)
@@ -297,6 +301,284 @@ class VentanaCalificaciones(ctk.CTkToplevel):
             except Exception as e:
                 conn.rollback()
                 self.lbl_msj.configure(text=f"Error: {e}", text_color=RED_COLOR)
+            finally:
+                cur.close()
+                conn.close()
+
+# ==========================================
+# VENTANA MODAL: CONTROL DE ASISTENCIA
+# ==========================================
+from datetime import datetime
+
+class VentanaAsistencia(ctk.CTkToplevel):
+    def __init__(self, master, id_seccion, nombre_clase):
+        super().__init__(master)
+        self.title(f"Control de Asistencia: {nombre_clase}")
+        self.geometry("750x600")
+        self.configure(fg_color=BG_COLOR)
+        self.grab_set()
+
+        self.id_seccion = id_seccion
+        self.dict_asistencias = {}
+        self.mapa_clases = {}
+
+        ctk.CTkLabel(self, text=f"Registro de Asistencia:\n{nombre_clase}", 
+                       font=ctk.CTkFont(size=18, weight="bold"), text_color=ACCENT_COLOR).pack(pady=(15, 5))
+
+        # --- PANEL SUPERIOR: SELECCIÓN / CREACIÓN DE FECHA ---
+        frame_top = ctk.CTkFrame(self, fg_color="transparent")
+        frame_top.pack(fill="x", padx=20, pady=5)
+
+        # Fechas guardadas en la base de datos
+        ctk.CTkLabel(frame_top, text="Fechas Registradas:", text_color=TEXT_COLOR).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.combo_fechas = ctk.CTkOptionMenu(
+            frame_top, 
+            width=160, 
+            fg_color=SIDEBAR_COLOR, 
+            text_color=TEXT_COLOR, 
+            button_color=ACCENT_COLOR,
+            command=self.al_seleccionar_fecha_combo
+        )
+        self.combo_fechas.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+        btn_eliminar_clase = ctk.CTkButton(
+            frame_top, 
+            text="Eliminar Clase Seleccionada", 
+            width=170, 
+            fg_color=RED_COLOR, 
+            text_color=TEXT_COLOR, 
+            command=self.eliminar_clase_actual
+        )
+        btn_eliminar_clase.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+
+        #  Ingreso manual de fecha
+        ctk.CTkLabel(frame_top, text="Fecha (YYYY-MM-DD):", text_color=TEXT_COLOR).grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        self.ent_fecha = ctk.CTkEntry(frame_top, width=160, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR)
+        self.ent_fecha.insert(0, fecha_hoy)
+        self.ent_fecha.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        btn_cargar = ctk.CTkButton(
+            frame_top, 
+            text="Cargar Fecha", 
+            width=170, 
+            fg_color=GREEN_COLOR, 
+            text_color=TEXT_COLOR, 
+            command=self.cargar_asistencia_fecha
+        )
+        btn_cargar.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+
+        self.lbl_msj = ctk.CTkLabel(self, text="", text_color=GREEN_COLOR)
+        self.lbl_msj.pack(pady=2)
+
+        # --- TABLA DE ESTUDIANTES ---
+        self.tabla_estudiantes = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR)
+        self.tabla_estudiantes.pack(padx=20, pady=5, fill="both", expand=True)
+        self.tabla_estudiantes.grid_columnconfigure((0, 1), weight=1)
+        self.tabla_estudiantes.grid_columnconfigure((2, 3), weight=0)
+
+        # Panel inferior: Botón Guardar
+        frame_bottom = ctk.CTkFrame(self, fg_color="transparent")
+        frame_bottom.pack(fill="x", padx=20, pady=10)
+
+        btn_guardar = ctk.CTkButton(
+            frame_bottom, 
+            text="Guardar / Actualizar Asistencia", 
+            fg_color=GREEN_COLOR, 
+            text_color=BG_COLOR, 
+            font=ctk.CTkFont(weight="bold"), 
+            command=self.guardar_asistencia
+        )
+        btn_guardar.pack(side="right")
+
+        # Cargar lista inicial
+        self.cargar_historial_fechas()
+        self.cargar_asistencia_fecha()
+
+    def cargar_historial_fechas(self):
+        conn, cur = conectar_bd()
+        if conn:
+            try:
+                cur.execute("SELECT id_clase, fecha_clase FROM clase WHERE id_seccion = %s ORDER BY fecha_clase DESC", (self.id_seccion,))
+                clases = cur.fetchall()
+                self.mapa_clases.clear()
+
+                if clases:
+                    opciones = []
+                    for id_c, f_clase in clases:
+                        str_f = str(f_clase)
+                        opciones.append(str_f)
+                        self.mapa_clases[str_f] = id_c
+                    self.combo_fechas.configure(values=opciones, state="normal")
+                    self.combo_fechas.set(opciones[0])
+                else:
+                    self.combo_fechas.configure(values=["Sin clases guardadas"], state="disabled")
+                    self.combo_fechas.set("Sin clases guardadas")
+            except Exception as e:
+                print("Error al cargar historial de fechas:", e)
+            finally:
+                cur.close()
+                conn.close()    
+
+    def al_seleccionar_fecha_combo(self, seleccion):
+        if seleccion in self.mapa_clases:
+            self.ent_fecha.delete(0, 'end')
+            self.ent_fecha.insert(0, seleccion)
+            self.cargar_asistencia_fecha()
+
+    def cargar_asistencia_fecha(self):
+        for widget in self.tabla_estudiantes.winfo_children():
+            widget.destroy()
+        
+        self.dict_asistencias.clear()
+        fecha_str = self.ent_fecha.get().strip()
+
+        encabezados = ["Cédula", "Estudiante", "% Inasistencia", "Asistió"]
+        for i, txt in enumerate(encabezados):
+            ctk.CTkLabel(self.tabla_estudiantes, text=txt, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=10, pady=10, sticky="w")
+
+        conn, cur = conectar_bd()
+        if conn:
+            try:
+                # Alumnos e inasistencias acumuladas (presente = FALSE)
+                query_alumnos = '''
+                    SELECT e.id_estudiante, e.cedula, e.apellidos, e.nombres,
+                           COUNT(a.id_asistencia) FILTER (WHERE a.presente = FALSE) AS inasistencias,
+                           COUNT(a.id_asistencia) AS total_clases
+                    FROM inscripcion i
+                    JOIN estudiante e ON i.id_estudiante = e.id_estudiante
+                    LEFT JOIN clase cl ON cl.id_seccion = i.id_seccion
+                    LEFT JOIN asistencia a ON a.id_clase = cl.id_clase AND a.id_estudiante = e.id_estudiante
+                    WHERE i.id_seccion = %s
+                    GROUP BY e.id_estudiante, e.cedula, e.apellidos, e.nombres
+                    ORDER BY e.apellidos, e.nombres
+                '''
+                cur.execute(query_alumnos, (self.id_seccion,))
+                alumnos = cur.fetchall()
+
+                # Consultar registros previos para la fecha seleccionada
+                query_asistencia_existente = '''
+                    SELECT a.id_estudiante, a.presente
+                    FROM asistencia a
+                    JOIN clase cl ON a.id_clase = cl.id_clase
+                    WHERE cl.id_seccion = %s AND cl.fecha_clase = %s
+                '''
+                cur.execute(query_asistencia_existente, (self.id_seccion, fecha_str))
+                asistencias_previas = dict(cur.fetchall())
+
+                if not alumnos:
+                    ctk.CTkLabel(self.tabla_estudiantes, text="No hay estudiantes inscritos en esta sección.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=4, pady=20)
+                    return
+
+                for fila, (id_est, cedula, apellidos, nombres, inasist, total_cl) in enumerate(alumnos, start=1):
+                    pct_inasist = (inasist / total_cl * 100) if total_cl and total_cl > 0 else 0.0
+                    color_pct = RED_COLOR if pct_inasist >= 30.0 else (ACCENT_COLOR if pct_inasist >= 25.0 else TEXT_COLOR)
+
+                    ctk.CTkLabel(self.tabla_estudiantes, text=cedula, text_color=TEXT_COLOR).grid(row=fila, column=0, padx=10, pady=5, sticky="w")
+                    ctk.CTkLabel(self.tabla_estudiantes, text=f"{apellidos}, {nombres}", text_color=TEXT_COLOR).grid(row=fila, column=1, padx=10, pady=5, sticky="w")
+                    
+                    txt_pct = f"{pct_inasist:.1f}% ({inasist} aus.)"
+                    if pct_inasist >= 30.0:
+                        txt_pct += " ❌ DESAPROBADO"
+                    elif pct_inasist >= 25.0:
+                        txt_pct += " ⚠️ ALERTA"
+                        
+                    ctk.CTkLabel(self.tabla_estudiantes, text=txt_pct, text_color=color_pct, font=ctk.CTkFont(weight="bold" if pct_inasist>=25 else "normal")).grid(row=fila, column=2, padx=10, pady=5, sticky="w")
+
+                    es_presente = asistencias_previas.get(id_est, True)
+                    chk_var = ctk.BooleanVar(value=es_presente)
+                    chk = ctk.CTkCheckBox(self.tabla_estudiantes, text="Presente", variable=chk_var)
+                    chk.grid(row=fila, column=3, padx=10, pady=5, sticky="w")
+                    
+                    self.dict_asistencias[id_est] = chk_var
+
+            except Exception as e:
+                print("Error al cargar lista de asistencia:", e)
+                self.lbl_msj.configure(text=f"Error: {e}", text_color=RED_COLOR)
+            finally:
+                cur.close()
+                conn.close()
+
+    def guardar_asistencia(self):
+        fecha_str = self.ent_fecha.get().strip()
+        if not fecha_str:
+            self.lbl_msj.configure(text="Ingresa una fecha válida.", text_color=RED_COLOR)
+            return
+
+        conn, cur = conectar_bd()
+        if conn:
+            try:
+                cur.execute("SELECT id_clase FROM clase WHERE id_seccion = %s AND fecha_clase = %s", (self.id_seccion, fecha_str))
+                res_clase = cur.fetchone()
+                
+                if res_clase:
+                    id_clase = res_clase[0]
+                else:
+                    cur.execute("INSERT INTO clase (id_seccion, fecha_clase) VALUES (%s, %s) RETURNING id_clase", (self.id_seccion, fecha_str))
+                    id_clase = cur.fetchone()[0]
+
+                for id_estudiante, var_presente in self.dict_asistencias.items():
+                    es_presente = var_presente.get()
+                    
+                    cur.execute("SELECT id_asistencia FROM asistencia WHERE id_clase = %s AND id_estudiante = %s", (id_clase, id_estudiante))
+                    res_asist = cur.fetchone()
+
+                    if res_asist:
+                        cur.execute("UPDATE asistencia SET presente = %s WHERE id_asistencia = %s", (es_presente, res_asist[0]))
+                    else:
+                        cur.execute("INSERT INTO asistencia (id_clase, id_estudiante, presente) VALUES (%s, %s, %s)", (id_clase, id_estudiante, es_presente))
+
+                conn.commit()
+                self.lbl_msj.configure(text="¡Asistencia guardada con éxito!", text_color=GREEN_COLOR)
+                
+                # Actualizamos historial de fechas y la vista
+                self.cargar_historial_fechas()
+                self.cargar_asistencia_fecha()
+
+            except Exception as e:
+                conn.rollback()
+                self.lbl_msj.configure(text=f"Error al guardar: {e}", text_color=RED_COLOR)
+            finally:
+                cur.close()
+                conn.close()
+
+    def eliminar_clase_actual(self):
+        """Elimina el registro de la clase errónea y sus asistencias asociadas de la BD."""
+        fecha_str = self.ent_fecha.get().strip()
+        if not fecha_str:
+            self.lbl_msj.configure(text="Selecciona una fecha válida.", text_color=RED_COLOR)
+            return
+
+        conn, cur = conectar_bd()
+        if conn:
+            try:
+                cur.execute("SELECT id_clase FROM clase WHERE id_seccion = %s AND fecha_clase = %s", (self.id_seccion, fecha_str))
+                res_clase = cur.fetchone()
+
+                if not res_clase:
+                    self.lbl_msj.configure(text="Esa fecha no existe en la BD.", text_color=RED_COLOR)
+                    return
+
+                id_clase = res_clase[0]
+
+                # Eliminar las asistencias vinculadas y luego la clase
+                cur.execute("DELETE FROM asistencia WHERE id_clase = %s", (id_clase,))
+                cur.execute("DELETE FROM clase WHERE id_clase = %s", (id_clase,))
+                
+                conn.commit()
+                self.lbl_msj.configure(text=f"Clase del {fecha_str} eliminada correctamente.", text_color=GREEN_COLOR)
+
+                # Resetear la fecha al día de hoy y refrescar datos
+                self.ent_fecha.delete(0, 'end')
+                self.ent_fecha.insert(0, datetime.now().strftime("%Y-%m-%d"))
+                
+                self.cargar_historial_fechas()
+                self.cargar_asistencia_fecha()
+
+            except Exception as e:
+                conn.rollback()
+                self.lbl_msj.configure(text=f"Error al eliminar: {e}", text_color=RED_COLOR)
             finally:
                 cur.close()
                 conn.close()
@@ -394,7 +676,7 @@ class VistaProfesor(ctk.CTkFrame):
             try:
                 query = '''
                     SELECT s.id_seccion, c.nombre, s.identificador, c.cupo_maximo,
-                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion) as inscritos,
+                           (SELECT COUNT(*) FROM inscripcion i WHERE i.id_seccion = s.id_seccion AND i.estado = 'Inscrito') as inscritos,
                            COALESCE(array_to_string(array_agg(h.dia_semana || ' ' || substr(h.hora_inicio::text, 1, 5) || '-' || substr(h.hora_fin::text, 1, 5) ORDER BY h.id_horario), ' | '), 'Sin asignar') as horario_str
                     FROM seccion s
                     JOIN curso c ON s.id_curso = c.id_curso
@@ -425,6 +707,9 @@ class VistaProfesor(ctk.CTkFrame):
 
                     btn_notas = ctk.CTkButton(frame_acc, text="Cargar Notas", width=100, fg_color=BLUE_COLOR, text_color=TEXT_COLOR, command=lambda s=id_sec, n=nom_completo: VentanaCalificaciones(self, s, n))
                     btn_notas.pack(side="left", padx=2)
+
+                    btn_asist = ctk.CTkButton(frame_acc, text="Asistencia", width=90, fg_color=GREEN_COLOR, text_color=BG_COLOR, command=lambda s=id_sec, n=nom_completo: VentanaAsistencia(self, s, n))
+                    btn_asist.pack(side="left", padx=2)
 
             except Exception as e:
                 print("Error cargando mis secciones:", e)

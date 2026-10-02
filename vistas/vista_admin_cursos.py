@@ -143,7 +143,6 @@ class VentanaConfigurarCurso(ctk.CTkToplevel):
                 cur.execute("SELECT id_curso, codigo, nombre FROM curso WHERE id_curso != %s ORDER BY codigo", (self.id_curso,))
                 self.datos_cursos = cur.fetchall()
 
-                # CORRECCIÓN: Vuelve a ser id_curso
                 cur.execute("SELECT id_curso_requisito FROM prelacion WHERE id_curso = %s", (self.id_curso,))
                 requisitos_actuales = [fila[0] for fila in cur.fetchall()]
 
@@ -194,7 +193,6 @@ class VentanaConfigurarCurso(ctk.CTkToplevel):
                     (codigo, nombre, cupo, costo, self.id_curso)
                 )
 
-                # CORRECCIÓN: Vuelve a ser id_curso
                 cur.execute("DELETE FROM prelacion WHERE id_curso = %s", (self.id_curso,))
                 for id_req, var in self.variables_check.items():
                     if var.get():
@@ -280,7 +278,6 @@ class VistaAdminCursos(ctk.CTkFrame):
         conn, cur = conectar_bd()
         if conn:
             try:
-                # CORRECCIÓN: El JOIN de prelacion vuelve a ser pr.id_curso
                 query = '''
                     SELECT c.id_curso, c.codigo, c.nombre, c.cupo_maximo, c.costo,
                            COALESCE(array_to_string(array_agg(DISTINCT ca.nombre), ', '), 'Asignación Pendiente') as carreras,
