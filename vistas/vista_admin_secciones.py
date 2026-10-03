@@ -155,20 +155,20 @@ class VentanaListaClase(ctk.CTkToplevel):
     def __init__(self, master, id_seccion, nombre_clase):
         super().__init__(master)
         self.title(f"Lista de Clase: {nombre_clase}")
-        self.geometry("500x500")
+        self.geometry("600x500")
         self.configure(fg_color=BG_COLOR)
         self.grab_set()
 
-        ctk.CTkLabel(self, text=f"Inscritos en:\n{nombre_clase}", font=ctk.CTkFont(size=18, weight="bold"), text_color=ACCENT_COLOR).pack(pady=15)
+        ctk.CTkLabel(self, text=f"Estudiantes en:\n{nombre_clase}", font=ctk.CTkFont(size=18, weight="bold"), text_color=ACCENT_COLOR).pack(pady=15)
 
         self.tabla_alumnos = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR)
         self.tabla_alumnos.pack(padx=20, pady=5, fill="both", expand=True)
-        self.tabla_alumnos.grid_columnconfigure((0,1,2), weight=1)
+        self.tabla_alumnos.grid_columnconfigure((0,1,2,3), weight=1)
 
         self.cargar_alumnos(id_seccion)
 
     def cargar_alumnos(self, id_seccion):
-        encabezados = ["Cédula", "Apellidos", "Nombres"]
+        encabezados = ["Cédula", "Apellidos", "Nombres", "Estado"]
         for i, txt in enumerate(encabezados):
             ctk.CTkLabel(self.tabla_alumnos, text=txt, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=5, pady=5, sticky="w")
 
@@ -176,7 +176,7 @@ class VentanaListaClase(ctk.CTkToplevel):
         if conn:
             try:
                 cur.execute('''
-                    SELECT e.cedula, e.apellidos, e.nombres 
+                    SELECT e.cedula, e.apellidos, e.nombres, i.estado 
                     FROM inscripcion i
                     JOIN estudiante e ON i.id_estudiante = e.id_estudiante
                     WHERE i.id_seccion = %s
@@ -185,12 +185,13 @@ class VentanaListaClase(ctk.CTkToplevel):
                 
                 alumnos = cur.fetchall()
                 if not alumnos:
-                    ctk.CTkLabel(self.tabla_alumnos, text="No hay alumnos inscritos aún.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=3, pady=20)
+                    ctk.CTkLabel(self.tabla_alumnos, text="No hay alumnos registrados aún.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=4, pady=20)
                 
-                for fila, (cedula, apellidos, nombres) in enumerate(alumnos, start=1):
+                for fila, (cedula, apellidos, nombres, estado) in enumerate(alumnos, start=1):
                     ctk.CTkLabel(self.tabla_alumnos, text=cedula, text_color=TEXT_COLOR).grid(row=fila, column=0, padx=5, pady=2, sticky="w")
                     ctk.CTkLabel(self.tabla_alumnos, text=apellidos, text_color=TEXT_COLOR).grid(row=fila, column=1, padx=5, pady=2, sticky="w")
                     ctk.CTkLabel(self.tabla_alumnos, text=nombres, text_color=TEXT_COLOR).grid(row=fila, column=2, padx=5, pady=2, sticky="w")
+                    ctk.CTkLabel(self.tabla_alumnos, text=estado, text_color=TEXT_COLOR).grid(row=fila, column=3, padx=5, pady=2, sticky="w")
             except Exception as e:
                 print("Error cargando lista:", e)
             finally:

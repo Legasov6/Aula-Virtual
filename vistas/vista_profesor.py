@@ -473,15 +473,15 @@ class VentanaAsistencia(ctk.CTkToplevel):
 
                 for fila, (id_est, cedula, apellidos, nombres, inasist, total_cl) in enumerate(alumnos, start=1):
                     pct_inasist = (inasist / total_cl * 100) if total_cl and total_cl > 0 else 0.0
-                    color_pct = RED_COLOR if pct_inasist >= 30.0 else (ACCENT_COLOR if pct_inasist >= 25.0 else TEXT_COLOR)
+                    color_pct = RED_COLOR if pct_inasist >30.0 else (ACCENT_COLOR if pct_inasist >= 25.0 else TEXT_COLOR)
 
                     ctk.CTkLabel(self.tabla_estudiantes, text=cedula, text_color=TEXT_COLOR).grid(row=fila, column=0, padx=10, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_estudiantes, text=f"{apellidos}, {nombres}", text_color=TEXT_COLOR).grid(row=fila, column=1, padx=10, pady=5, sticky="w")
                     
                     txt_pct = f"{pct_inasist:.1f}% ({inasist} aus.)"
-                    if pct_inasist >= 30.0:
+                    if pct_inasist >30.0:
                         txt_pct += " ❌ DESAPROBADO"
-                    elif pct_inasist >= 25.0:
+                    elif pct_inasist >=25.0:
                         txt_pct += " ⚠️ ALERTA"
                         
                     ctk.CTkLabel(self.tabla_estudiantes, text=txt_pct, text_color=color_pct, font=ctk.CTkFont(weight="bold" if pct_inasist>=25 else "normal")).grid(row=fila, column=2, padx=10, pady=5, sticky="w")
