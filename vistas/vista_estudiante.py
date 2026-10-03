@@ -97,7 +97,16 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
         conn, cur = conectar_bd()
         if conn:
             try:
-            # Si se va a inscribir de forma regular
+                # Comprobar si ya existe inscripción previa (incluso Retirada)
+                cur.execute("SELECT id_inscripcion, estado FROM inscripcion WHERE id_estudiante = %s AND id_seccion = %s",
+                            (self.id_estudiante, id_seccion))
+                previa = cur.fetchone()
+
+                if previa and previa[1] in ('Inscrito', 'En_espera'):
+                    self.lbl_msj.configure(text="Ya estás registrado o en lista de espera para esta materia.", text_color=RED_COLOR)
+                    return
+
+                # Si se va a inscribir de forma regular
                 if not en_espera:
                     cur.execute("SELECT saldo FROM estudiante WHERE id_estudiante = %s", (self.id_estudiante,))
                     saldo_actual = cur.fetchone()[0]
@@ -106,15 +115,30 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
                         self.lbl_msj.configure(text=f"Saldo insuficiente. Necesitas ${self.costo:.2f}", text_color=RED_COLOR)
                         return
 
-                    cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, %s, 'Inscrito')",
-                        (self.id_estudiante, id_seccion, self.costo))
+                    if previa and previa[1] == 'Retirado':
+                        cur.execute('''
+                            UPDATE inscripcion 
+                            SET estado = 'Inscrito', costo_cobrado = %s, fecha_registro = CURRENT_TIMESTAMP 
+                            WHERE id_inscripcion = %s
+                        ''', (self.costo, previa[0]))
+                    else:
+                        cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, %s, 'Inscrito')",
+                            (self.id_estudiante, id_seccion, self.costo))
+
                     cur.execute("UPDATE estudiante SET saldo = saldo - %s WHERE id_estudiante = %s",
                         (self.costo, self.id_estudiante))
                     msj_exito = "¡Inscrito correctamente!"
                 else:
                     # Registrar en Lista de Espera (mantenemos costo_cobrado = 0.00 hasta que se libere un cupo)
-                    cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, 0.00, 'En_espera')",
-                    (self.id_estudiante, id_seccion))
+                    if previa and previa[1] == 'Retirado':
+                        cur.execute('''
+                            UPDATE inscripcion 
+                            SET estado = 'En_espera', costo_cobrado = 0.00, fecha_registro = CURRENT_TIMESTAMP 
+                            WHERE id_inscripcion = %s
+                        ''', (previa[0],))
+                    else:
+                        cur.execute("INSERT INTO inscripcion (id_estudiante, id_seccion, costo_cobrado, estado) VALUES (%s, %s, 0.00, 'En_espera')",
+                            (self.id_estudiante, id_seccion))
                     msj_exito = "¡Agregado a la Lista de Espera!"
 
                 conn.commit()
@@ -132,6 +156,122 @@ class VentanaElegirSeccion(ctk.CTkToplevel):
             finally:
                 cur.close()
                 conn.close()
+
+
+# ==========================================
+# VENTANA MODAL: CONFIRMAR RETIRO DE MATERIA
+# ==========================================
+class VentanaConfirmarRetiro(ctk.CTkToplevel):
+    def __init__(self, master, id_seccion, nombre_curso, id_estudiante, callback_actualizar):
+        super().__init__(master)
+        self.title("Retirar Materia")
+        self.geometry("450x260")
+        self.configure(fg_color=BG_COLOR)
+        self.grab_set()
+
+        self.id_seccion = id_seccion
+        self.nombre_curso = nombre_curso
+        self.id_estudiante = id_estudiante
+        self.callback_actualizar = callback_actualizar
+
+        ctk.CTkLabel(self, text="Confirmación de Retiro", font=ctk.CTkFont(size=18, weight="bold"), text_color=RED_COLOR).pack(pady=(15, 10))
+        
+        texto_adv = (
+            f"¿Deseas retirar la materia '{nombre_curso}'?\n\n"
+            "Atención: Según el reglamento institucional,\n"
+            "NO se realiza reembolso del monto cobrado."
+        )
+        ctk.CTkLabel(self, text=texto_adv, font=ctk.CTkFont(size=13), text_color=TEXT_COLOR, justify="center").pack(padx=20, pady=5)
+
+        self.lbl_msj = ctk.CTkLabel(self, text="", text_color=GREEN_COLOR)
+        self.lbl_msj.pack(pady=5)
+
+        frame_botones = ctk.CTkFrame(self, fg_color="transparent")
+        frame_botones.pack(pady=10)
+
+        self.btn_confirmar = ctk.CTkButton(frame_botones, text="Sí, Retirar", width=110, fg_color=RED_COLOR, text_color=TEXT_COLOR, font=ctk.CTkFont(weight="bold"), command=self.procesar_retiro)
+        self.btn_confirmar.pack(side="left", padx=10)
+
+        self.btn_cancelar = ctk.CTkButton(frame_botones, text="Cancelar", width=100, fg_color=SIDEBAR_COLOR, text_color=TEXT_COLOR, command=self.destroy)
+        self.btn_cancelar.pack(side="left", padx=10)
+
+    def procesar_retiro(self):
+        self.lbl_msj.configure(text="")
+        conn, cur = conectar_bd()
+        if not conn:
+            self.lbl_msj.configure(text="Error de conexión a la BD.", text_color=RED_COLOR)
+            return
+
+        try:
+            # 1. Obtener la inscripción activa y el costo del curso
+            cur.execute('''
+                SELECT i.id_inscripcion, c.costo
+                FROM inscripcion i
+                JOIN seccion s ON i.id_seccion = s.id_seccion
+                JOIN curso c ON s.id_curso = c.id_curso
+                WHERE i.id_estudiante = %s AND i.id_seccion = %s AND i.estado = 'Inscrito'
+                FOR UPDATE OF i;
+            ''', (self.id_estudiante, self.id_seccion))
+            fila = cur.fetchone()
+
+            if not fila:
+                self.lbl_msj.configure(text="No se encontró inscripción activa.", text_color=RED_COLOR)
+                return
+
+            id_inscripcion, costo_curso = fila
+
+            # 2. Marcar como Retirado (Cero reembolso)
+            cur.execute("UPDATE inscripcion SET estado = 'Retirado' WHERE id_inscripcion = %s", (id_inscripcion,))
+
+            # 3. Buscar alumnos en lista de espera por orden de llegada (FIFO)
+            cur.execute('''
+                SELECT i.id_inscripcion, i.id_estudiante, e.saldo, e.nombres, e.apellidos
+                FROM inscripcion i
+                JOIN estudiante e ON i.id_estudiante = e.id_estudiante
+                WHERE i.id_seccion = %s AND i.estado = 'En_espera'
+                ORDER BY i.fecha_registro ASC, i.id_inscripcion ASC
+                FOR UPDATE OF i, e;
+            ''', (self.id_seccion,))
+            candidatos = cur.fetchall()
+
+            alumno_promovido = None
+            for id_insc_cand, id_est_cand, saldo_cand, nom_cand, ape_cand in candidatos:
+                # Si tiene saldo suficiente, se le asigna el cupo y se le cobra
+                if saldo_cand >= costo_curso:
+                    cur.execute('''
+                        UPDATE inscripcion 
+                        SET estado = 'Inscrito', costo_cobrado = %s, fecha_registro = CURRENT_TIMESTAMP
+                        WHERE id_inscripcion = %s
+                    ''', (costo_curso, id_insc_cand))
+                    
+                    cur.execute('''
+                        UPDATE estudiante 
+                        SET saldo = saldo - %s 
+                        WHERE id_estudiante = %s
+                    ''', (costo_curso, id_est_cand))
+
+                    alumno_promovido = f"{nom_cand} {ape_cand}"
+                    break # Se asignó el único cupo liberado
+
+            conn.commit()
+
+            msj = "Materia retirada exitosamente."
+            if alumno_promovido:
+                msj += f"\nCupo asignado a: {alumno_promovido}"
+            self.lbl_msj.configure(text=msj, text_color=GREEN_COLOR)
+
+            self.btn_confirmar.configure(state="disabled")
+            self.btn_cancelar.configure(state="disabled")
+
+            self.callback_actualizar()
+            self.after(1500, self.destroy)
+
+        except Exception as e:
+            conn.rollback()
+            self.lbl_msj.configure(text=f"Error: {e}", text_color=RED_COLOR)
+        finally:
+            cur.close()
+            conn.close()
 
 
 # ==========================================
@@ -364,15 +504,16 @@ class VistaEstudiante(ctk.CTkFrame):
                 query = '''
                     SELECT pe.codigo_periodo, cu.nombre,
                            COALESCE(SUM(cal.nota_numerica * (ev.ponderacion / 100.0)), 0) as nota_acumulada,
-                           COALESCE(SUM(ev.ponderacion), 0) as porcentaje_evaluado
+                           COALESCE(SUM(ev.ponderacion), 0) as porcentaje_evaluado,
+                           i.estado
                     FROM inscripcion i
                     JOIN seccion s ON i.id_seccion = s.id_seccion
                     JOIN periodo pe ON s.id_periodo = pe.id_periodo
                     JOIN curso cu ON s.id_curso = cu.id_curso
                     LEFT JOIN evaluacion ev ON s.id_seccion = ev.id_seccion
                     LEFT JOIN calificacion cal ON ev.id_evaluacion = cal.id_evaluacion AND cal.id_estudiante = i.id_estudiante
-                    WHERE i.id_estudiante = %s
-                    GROUP BY pe.id_periodo, pe.codigo_periodo, cu.nombre
+                    WHERE i.id_estudiante = %s AND i.estado IN ('Inscrito', 'Retirado')
+                    GROUP BY pe.id_periodo, pe.codigo_periodo, cu.nombre, i.estado
                     ORDER BY pe.id_periodo DESC, cu.nombre
                 '''
                 cur.execute(query, (self.id_estudiante_actual,))
@@ -381,30 +522,33 @@ class VistaEstudiante(ctk.CTkFrame):
                 if not historial:
                     ctk.CTkLabel(self.tabla_kardex, text="Aún no tienes historial académico.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=4, pady=20)
 
-                for fila_idx, (periodo, curso, nota_acumulada, porcentaje_evaluado) in enumerate(historial, start=1):
+                for fila_idx, (periodo, curso, nota_acumulada, porcentaje_evaluado, estado_insc) in enumerate(historial, start=1):
                     # Convertimos de Decimal a float
                     nota_acumulada = float(nota_acumulada)
                     porcentaje_evaluado = float(porcentaje_evaluado)
 
-                    # Lógica de Estado: Solo se aprueba si el profesor evaluó el 100% y sacaste >= 5.0 (Base 10)
-                    estado_texto = "Cursando / Sin notas"
-                    color_estado = TEXT_COLOR
+                    if estado_insc == 'Retirado':
+                        estado_texto = "Retirada"
+                        color_estado = ACCENT_COLOR
+                        texto_nota = "-- / 10"
+                    else:
+                        texto_nota = f"{nota_acumulada:.2f} / 10"
+                        estado_texto = "Cursando / Sin notas"
+                        color_estado = TEXT_COLOR
 
-                    if porcentaje_evaluado == 100.0:
-                        if nota_acumulada >= 5.0:
-                            estado_texto = "Aprobado"
-                            color_estado = GREEN_COLOR
-                        else:
-                            estado_texto = "Reprobado"
-                            color_estado = RED_COLOR
-                    elif porcentaje_evaluado > 0.0:
-                        estado_texto = f"En progreso ({porcentaje_evaluado}%)"
+                        if porcentaje_evaluado == 100.0:
+                            if nota_acumulada >= 5.0:
+                                estado_texto = "Aprobado"
+                                color_estado = GREEN_COLOR
+                            else:
+                                estado_texto = "Reprobado"
+                                color_estado = RED_COLOR
+                        elif porcentaje_evaluado > 0.0:
+                            estado_texto = f"En progreso ({porcentaje_evaluado}%)"
 
                     ctk.CTkLabel(self.tabla_kardex, text=periodo, text_color=TEXT_COLOR).grid(row=fila_idx, column=0, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_kardex, text=curso, text_color=TEXT_COLOR).grid(row=fila_idx, column=1, padx=5, pady=5, sticky="w")
-                    
-                    # Mostramos la nota sobre 10
-                    ctk.CTkLabel(self.tabla_kardex, text=f"{nota_acumulada:.2f} / 10", text_color=TEXT_COLOR, font=ctk.CTkFont(weight="bold")).grid(row=fila_idx, column=2, padx=5, pady=5, sticky="w")
+                    ctk.CTkLabel(self.tabla_kardex, text=texto_nota, text_color=TEXT_COLOR, font=ctk.CTkFont(weight="bold")).grid(row=fila_idx, column=2, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_kardex, text=estado_texto, text_color=color_estado, font=ctk.CTkFont(weight="bold")).grid(row=fila_idx, column=3, padx=5, pady=5, sticky="w")
 
             except Exception as e:
@@ -414,12 +558,13 @@ class VistaEstudiante(ctk.CTkFrame):
                 conn.close()
 
     # ==========================================
-    # PESTAÑA: MI HORARIO
+    # PESTAÑA: MI HORARIO (CON BOTÓN DE RETIRO)
     # ==========================================
     def construir_pestaña_horario(self):
         self.tabla_mi_horario = ctk.CTkScrollableFrame(self.tab_horario, fg_color=BG_COLOR)
         self.tabla_mi_horario.pack(padx=20, pady=20, fill="both", expand=True)
         self.tabla_mi_horario.grid_columnconfigure((0,1,2,3), weight=1)
+        self.tabla_mi_horario.grid_columnconfigure(4, weight=0)
 
     def cargar_horario(self):
         for widget in self.tabla_mi_horario.winfo_children():
@@ -428,7 +573,7 @@ class VistaEstudiante(ctk.CTkFrame):
         if not self.id_estudiante_actual or not self.id_periodo_activo or not self.id_carrera_actual: 
             return
 
-        encabezados = ["Materia", "Sección", "Profesor", "Horario"]
+        encabezados = ["Materia", "Sección", "Profesor", "Horario", "Acción"]
         for i, texto in enumerate(encabezados):
             ctk.CTkLabel(self.tabla_mi_horario, text=texto, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=5, pady=10, sticky="w")
 
@@ -437,28 +582,40 @@ class VistaEstudiante(ctk.CTkFrame):
             try:
                 query = '''
                     SELECT c.nombre, s.identificador, p.nombres, p.apellidos,
-                           COALESCE(array_to_string(array_agg(h.dia_semana || ' ' || substr(h.hora_inicio::text, 1, 5) || '-' || substr(h.hora_fin::text, 1, 5) ORDER BY h.id_horario), ' | '), 'Sin asignar')
+                           COALESCE(array_to_string(array_agg(h.dia_semana || ' ' || substr(h.hora_inicio::text, 1, 5) || '-' || substr(h.hora_fin::text, 1, 5) ORDER BY h.id_horario), ' | '), 'Sin asignar') as horario,
+                           s.id_seccion
                     FROM inscripcion i
                     JOIN seccion s ON i.id_seccion = s.id_seccion
                     JOIN curso c ON s.id_curso = c.id_curso
                     JOIN profesor p ON s.id_profesor = p.id_profesor
                     JOIN pensum pe ON c.id_curso = pe.id_curso
                     LEFT JOIN horario h ON s.id_seccion = h.id_seccion
-                    WHERE i.id_estudiante = %s AND s.id_periodo = %s AND pe.id_carrera = %s
-                    GROUP BY c.nombre, s.identificador, p.nombres, p.apellidos
+                    WHERE i.id_estudiante = %s AND s.id_periodo = %s AND pe.id_carrera = %s AND i.estado = 'Inscrito'
+                    GROUP BY c.nombre, s.identificador, p.nombres, p.apellidos, s.id_seccion
                     ORDER BY c.nombre
                 '''
                 cur.execute(query, (self.id_estudiante_actual, self.id_periodo_activo, self.id_carrera_actual))
                 clases = cur.fetchall()
 
                 if not clases:
-                    ctk.CTkLabel(self.tabla_mi_horario, text="No tienes clases inscritas de esta carrera en este periodo.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=4, pady=20)
+                    ctk.CTkLabel(self.tabla_mi_horario, text="No tienes clases inscritas de esta carrera en este periodo.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=5, pady=20)
 
-                for fila_idx, (curso, sec, nom_prof, ape_prof, horario) in enumerate(clases, start=1):
+                for fila_idx, (curso, sec, nom_prof, ape_prof, horario, id_sec) in enumerate(clases, start=1):
                     ctk.CTkLabel(self.tabla_mi_horario, text=curso, text_color=TEXT_COLOR).grid(row=fila_idx, column=0, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_mi_horario, text=sec, text_color=TEXT_COLOR).grid(row=fila_idx, column=1, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_mi_horario, text=f"{ape_prof}, {nom_prof}", text_color=TEXT_COLOR).grid(row=fila_idx, column=2, padx=5, pady=5, sticky="w")
                     ctk.CTkLabel(self.tabla_mi_horario, text=horario, text_color=TEXT_COLOR).grid(row=fila_idx, column=3, padx=5, pady=5, sticky="w")
+
+                    btn_retirar = ctk.CTkButton(
+                        self.tabla_mi_horario,
+                        text="Retirar",
+                        width=80,
+                        fg_color=RED_COLOR,
+                        text_color=TEXT_COLOR,
+                        font=ctk.CTkFont(weight="bold"),
+                        command=lambda s=id_sec, c=curso: VentanaConfirmarRetiro(self, s, c, self.id_estudiante_actual, self.actualizar_tablas)
+                    )
+                    btn_retirar.grid(row=fila_idx, column=4, padx=5, pady=5, sticky="e")
 
             except Exception as e:
                 print("Error cargando mi horario:", e)
@@ -504,7 +661,7 @@ class VistaEstudiante(ctk.CTkFrame):
                           SELECT s2.id_curso
                           FROM inscripcion i
                           JOIN seccion s2 ON i.id_seccion = s2.id_seccion
-                          WHERE i.id_estudiante = %s AND s2.id_periodo = %s
+                          WHERE i.id_estudiante = %s AND s2.id_periodo = %s AND i.estado IN ('Inscrito', 'En_espera')
                       )
                       AND NOT EXISTS (
                           SELECT 1 FROM prelacion pr
