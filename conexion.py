@@ -5,8 +5,8 @@ def conectar_bd():
     try:
         conn = psycopg2.connect(
             dbname="aula_virtual", 
-            user="postgres", 
-            password="PON_TU_PASSWORD_AQUI", # ¡No subir la clave real!
+            user="gabriel", 
+            password="censorGT", # ¡No subir la clave real!
             host="localhost"
         )
         return conn, conn.cursor()

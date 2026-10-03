@@ -86,7 +86,6 @@ class VentanaNuevoEstudiante(ctk.CTkToplevel):
                 cur.close()
                 conn.close()
 
-
 # ==========================================
 # VENTANA MODAL: EDITAR ESTUDIANTE
 # ==========================================
@@ -183,7 +182,6 @@ class VentanaEditarEstudiante(ctk.CTkToplevel):
                 cur.close()
                 conn.close()
 
-
 # ==========================================
 # VENTANA MODAL: RECARGAR SALDO
 # ==========================================
@@ -224,7 +222,13 @@ class VentanaRecargaSaldo(ctk.CTkToplevel):
         conn, cur = conectar_bd()
         if conn:
             try:
+                # 1. Actualiza el saldo en la billetera
                 cur.execute("UPDATE estudiante SET saldo = saldo + %s WHERE id_estudiante = %s", (monto, self.id_estudiante))
+                
+                # 2. Guarda el recibo en la tabla pago
+                cur.execute("INSERT INTO pago (monto, concepto_pago, id_estudiante) VALUES (%s, %s, %s)", 
+                            (monto, "Recarga de saldo en caja", self.id_estudiante))
+                
                 conn.commit()
                 
                 self.callback_kardex() 
@@ -237,7 +241,6 @@ class VentanaRecargaSaldo(ctk.CTkToplevel):
                 cur.close()
                 conn.close()
 
-
 # ==========================================
 # VENTANA MODAL: KÁRDEX / EXPEDIENTE
 # ==========================================
@@ -248,7 +251,7 @@ class VentanaKardex(ctk.CTkToplevel):
         self.callback_actualizar = callback_actualizar 
         
         self.title("Expediente del Estudiante")
-        self.geometry("750x650") # Ampliamos la ventana para acomodar las dos tablas
+        self.geometry("750x650") 
         self.configure(fg_color=BG_COLOR)
         self.grab_set()
 
@@ -270,7 +273,7 @@ class VentanaKardex(ctk.CTkToplevel):
 
         self.frame_carreras = ctk.CTkScrollableFrame(self, fg_color=SIDEBAR_COLOR, height=100)
         self.frame_carreras.pack(padx=20, pady=5, fill="x")
-        self.frame_carreras.grid_columnconfigure((0, 1), weight=1)
+        self.frame_carreras.grid_columnconfigure((0, 1, 2), weight=1) # 3 columnas ahora
 
         frame_nueva_carrera = ctk.CTkFrame(self, fg_color="transparent")
         frame_nueva_carrera.pack(pady=5)
@@ -298,17 +301,17 @@ class VentanaKardex(ctk.CTkToplevel):
         VentanaRecargaSaldo(self, self.id_estudiante, self.cargar_datos, self.callback_actualizar)
 
     def cargar_datos(self):
-        # Limpiar ambas tablas
         for widget in self.frame_carreras.winfo_children():
             widget.destroy()
         for widget in self.tabla_notas.winfo_children():
             widget.destroy()
 
-        # Poner encabezados en Carreras
+        # Encabezados en Carreras
         ctk.CTkLabel(self.frame_carreras, text="CARRERA", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=0, sticky="w", padx=5, pady=5)
         ctk.CTkLabel(self.frame_carreras, text="ESTADO", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        ctk.CTkLabel(self.frame_carreras, text="FECHA INGRESO", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=2, sticky="w", padx=5, pady=5)
 
-        # Poner encabezados en Notas
+        # Encabezados en Notas
         encabezados_notas = ["Periodo", "Materia", "Nota Acumulada", "Estado"]
         for i, texto in enumerate(encabezados_notas):
             ctk.CTkLabel(self.tabla_notas, text=texto, font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=i, padx=5, pady=5, sticky="w")
@@ -327,18 +330,20 @@ class VentanaKardex(ctk.CTkToplevel):
                     texto_datos = f"C.I: {est[0]}  |  Nacimiento: {fecha_str}  |  Teléfono: {tel_str}\nEmail: {est[3]}  |  Saldo Disponible: ${est[4]:.2f}"
                     self.lbl_datos.configure(text=texto_datos)
 
-                # 2. Cargar Carreras
+                # 2. Cargar Carreras (Agregando fecha_inscripcion)
                 cur.execute('''
-                    SELECT c.nombre, ec.estado
+                    SELECT c.nombre, ec.estado, ec.fecha_inscripcion
                     FROM expediente_carrera ec
                     JOIN carrera c ON ec.id_carrera = c.id_carrera
                     WHERE ec.id_estudiante = %s
                 ''', (self.id_estudiante,))
                 carreras_inscritas = cur.fetchall()
 
-                for i, (nombre_carrera, estado) in enumerate(carreras_inscritas, start=1):
+                for i, (nombre_carrera, estado, fecha) in enumerate(carreras_inscritas, start=1):
+                    fecha_ingreso = fecha.strftime("%Y-%m-%d") if fecha else "N/A"
                     ctk.CTkLabel(self.frame_carreras, text=nombre_carrera, text_color=TEXT_COLOR).grid(row=i, column=0, sticky="w", padx=5, pady=2)
                     ctk.CTkLabel(self.frame_carreras, text=estado, text_color=TEXT_COLOR).grid(row=i, column=1, sticky="w", padx=5, pady=2)
+                    ctk.CTkLabel(self.frame_carreras, text=fecha_ingreso, text_color=TEXT_COLOR).grid(row=i, column=2, sticky="w", padx=5, pady=2)
 
                 cur.execute('''
                     SELECT id_carrera, nombre FROM carrera
@@ -436,7 +441,6 @@ class VentanaKardex(ctk.CTkToplevel):
             finally:
                 cur.close()
                 conn.close()
-
 
 # ==========================================
 # PANEL PRINCIPAL: VISTA ADMIN (Estudiantes)

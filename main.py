@@ -7,6 +7,7 @@ from vistas.vista_admin_cursos import VistaAdminCursos
 from vistas.vista_admin_institucion import VistaAdminInstitucion
 from vistas.vista_admin_profesores import VistaAdminProfesores
 from vistas.vista_admin_secciones import VistaAdminSecciones
+from vistas.vista_admin_reportes import VistaAdminReportes
 
 BG_COLOR = "#282828"
 SIDEBAR_COLOR = "#3c3836"
@@ -72,11 +73,12 @@ class AulaVirtualApp(ctk.CTk):
         if rol_seleccionado == "Administrador":
             self.vista_actual = VistaAdmin(self)
             self.crear_boton_submenu("🎓 Estudiantes", lambda: self.cargar_vista_admin_estudiantes())
-            self.crear_boton_submenu("👨‍🏫 Profesores", lambda: self.cargar_vista_admin_profesores())
+            self.crear_boton_submenu("👨 Profesores", lambda: self.cargar_vista_admin_profesores())
             self.crear_boton_submenu("📚 Cursos", lambda: self.cargar_vista_admin_cursos())
             self.crear_boton_submenu("🏫 Secciones", lambda: self.cargar_vista_admin_secciones())
             self.crear_boton_submenu("⚙️ Institución", lambda: self.cargar_vista_admin_institucion())
-            
+            self.crear_boton_submenu("📊 Reportes", lambda: self.cargar_vista_admin_reportes())
+
         elif rol_seleccionado == "Profesor":
             self.vista_actual = VistaProfesor(self)
             self.crear_boton_submenu("📅 Mi Portal Docente", lambda: self.cargar_vista_profesor())
@@ -119,6 +121,12 @@ class AulaVirtualApp(ctk.CTk):
         if self.vista_actual is not None:
             self.vista_actual.destroy()
         self.vista_actual = VistaAdminInstitucion(self)
+        self.vista_actual.grid(row=0, column=1, sticky="nsew")
+
+    def cargar_vista_admin_reportes(self):
+        if self.vista_actual is not None:
+            self.vista_actual.destroy()
+        self.vista_actual = VistaAdminReportes(self)
         self.vista_actual.grid(row=0, column=1, sticky="nsew")
 
     def cargar_vista_profesor(self):

@@ -168,7 +168,7 @@ class VistaEstudiante(ctk.CTkFrame):
         self.tabview.pack(padx=20, pady=10, fill="both", expand=True)
 
         self.tab_perfil = self.tabview.add("Mi Perfil")
-        self.tab_kardex = self.tabview.add("Mi Kárdex") # NUEVA PESTAÑA
+        self.tab_kardex = self.tabview.add("Mi Kárdex") 
         self.tab_horario = self.tabview.add("Mi Horario")
         self.tab_inscripcion = self.tabview.add("Inscripciones")
 
@@ -295,13 +295,18 @@ class VistaEstudiante(ctk.CTkFrame):
         
         self.tabla_carreras = ctk.CTkScrollableFrame(self.tab_perfil, fg_color=BG_COLOR, height=150)
         self.tabla_carreras.pack(padx=50, pady=5, fill="x")
-        self.tabla_carreras.grid_columnconfigure((0,1), weight=1)
+        self.tabla_carreras.grid_columnconfigure((0,1,2), weight=1) # 3 Columnas ahora
 
     def cargar_perfil(self):
         if not self.id_estudiante_actual: return
 
         for widget in self.tabla_carreras.winfo_children():
             widget.destroy()
+
+        # Agregamos los encabezados
+        ctk.CTkLabel(self.tabla_carreras, text="Carrera", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self.tabla_carreras, text="Estado", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self.tabla_carreras, text="Fecha Ingreso", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=2, sticky="w", padx=10, pady=5)
 
         conn, cur = conectar_bd()
         if conn:
@@ -322,14 +327,13 @@ class VistaEstudiante(ctk.CTkFrame):
                 
                 carreras = cur.fetchall()
                 if not carreras:
-                    ctk.CTkLabel(self.tabla_carreras, text="No estás inscrito en ninguna carrera.", text_color=TEXT_COLOR).grid(row=0, column=0, pady=10)
+                    ctk.CTkLabel(self.tabla_carreras, text="No estás inscrito en ninguna carrera.", text_color=TEXT_COLOR).grid(row=1, column=0, columnspan=3, pady=10)
                 else:
-                    ctk.CTkLabel(self.tabla_carreras, text="Carrera", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=0, sticky="w", padx=10, pady=5)
-                    ctk.CTkLabel(self.tabla_carreras, text="Estado", font=ctk.CTkFont(weight="bold"), text_color=ACCENT_COLOR).grid(row=0, column=1, sticky="w", padx=10, pady=5)
-                    
                     for i, (nom, est, fecha) in enumerate(carreras, start=1):
+                        fecha_str = fecha.strftime("%Y-%m-%d") if fecha else "N/A"
                         ctk.CTkLabel(self.tabla_carreras, text=nom, text_color=TEXT_COLOR).grid(row=i, column=0, sticky="w", padx=10, pady=2)
                         ctk.CTkLabel(self.tabla_carreras, text=est, text_color=TEXT_COLOR).grid(row=i, column=1, sticky="w", padx=10, pady=2)
+                        ctk.CTkLabel(self.tabla_carreras, text=fecha_str, text_color=TEXT_COLOR).grid(row=i, column=2, sticky="w", padx=10, pady=2)
             except Exception as e:
                 print("Error cargando perfil:", e)
             finally:
@@ -357,7 +361,6 @@ class VistaEstudiante(ctk.CTkFrame):
         conn, cur = conectar_bd()
         if conn:
             try:
-                # Motor matemático: Suma de (nota_numerica * ponderacion / 100)
                 query = '''
                     SELECT pe.codigo_periodo, cu.nombre,
                            COALESCE(SUM(cal.nota_numerica * (ev.ponderacion / 100.0)), 0) as nota_acumulada,
